@@ -215,6 +215,26 @@ func (w *Producer) DeferredPublishAsync(topic string, delay time.Duration, body 
 	return w.sendCommandAsync(DeferredPublish(topic, delay, body), doneChan, args)
 }
 
+// ScheduledPublish synchronously publishes a message body to the specified topic
+// where the message will queue at the channel level until the time comes, returning
+// an error if publish failed
+func (w *Producer) ScheduledPublish(topic string, schedule time.Time, body []byte) error {
+	return w.sendCommand(ScheduledPublish(topic, schedule, body))
+}
+
+// ScheduledPublishAsync publishes a message body to the specified topic
+// where the message will queue at the channel level until the time comes
+// but does not wait for the response from `nsqd`.
+//
+// When the Producer eventually receives the response from `nsqd`,
+// the supplied `doneChan` (if specified)
+// will receive a `ProducerTransaction` instance with the supplied variadic arguments
+// and the response error if present
+func (w *Producer) ScheduledPublishAsync(topic string, schedule time.Time, body []byte,
+	doneChan chan *ProducerTransaction, args ...interface{}) error {
+	return w.sendCommandAsync(ScheduledPublish(topic, schedule, body), doneChan, args)
+}
+
 func (w *Producer) sendCommand(cmd *Command) error {
 	doneChan := make(chan *ProducerTransaction)
 	err := w.sendCommandAsync(cmd, doneChan, nil)
