@@ -15,7 +15,6 @@ const (
 	LogLevelInfo
 	LogLevelWarning
 	LogLevelError
-	LogLevelMax = iota - 1 // convenience - match highest log level
 )
 
 // String returns the string form for a given LogLevel

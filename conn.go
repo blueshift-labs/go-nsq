@@ -65,9 +65,9 @@ type Conn struct {
 
 	delegate ConnDelegate
 
-	logger   []logger
+	logger   logger
 	logLvl   LogLevel
-	logFmt   []string
+	logFmt   string
 	logGuard sync.RWMutex
 
 	r io.Reader
@@ -103,9 +103,6 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 		msgResponseChan: make(chan *msgResponse),
 		exitChan:        make(chan int),
 		drainReady:      make(chan int),
-
-		logger: make([]logger, LogLevelMax+1),
-		logFmt: make([]string, LogLevelMax+1),
 	}
 }
 
@@ -125,47 +122,19 @@ func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
-	if format == "" {
-		format = "(%s)"
-	}
-	for level := range c.logger {
-		c.logger[level] = l
-		c.logFmt[level] = format
-	}
+	c.logger = l
 	c.logLvl = lvl
-}
-
-func (c *Conn) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
-	c.logGuard.Lock()
-	defer c.logGuard.Unlock()
-
-	if format == "" {
-		format = "(%s)"
+	c.logFmt = format
+	if c.logFmt == "" {
+		c.logFmt = "(%s)"
 	}
-	c.logger[lvl] = l
-	c.logFmt[lvl] = format
 }
 
-// SetLoggerLevel sets the package logging level.
-func (c *Conn) SetLoggerLevel(lvl LogLevel) {
-	c.logGuard.Lock()
-	defer c.logGuard.Unlock()
-
-	c.logLvl = lvl
-}
-
-func (c *Conn) getLogger(lvl LogLevel) (logger, LogLevel, string) {
+func (c *Conn) getLogger() (logger, LogLevel, string) {
 	c.logGuard.RLock()
 	defer c.logGuard.RUnlock()
 
-	return c.logger[lvl], c.logLvl, c.logFmt[lvl]
-}
-
-func (c *Conn) getLogLevel() LogLevel {
-	c.logGuard.RLock()
-	defer c.logGuard.RUnlock()
-
-	return c.logLvl
+	return c.logger, c.logLvl, c.logFmt
 }
 
 // Connect dials and bootstraps the nsqd connection
@@ -749,7 +718,7 @@ func (c *Conn) onMessageTouch(m *Message) {
 }
 
 func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl, logFmt := c.getLogger(lvl)
+	logger, logLvl, logFmt := c.getLogger()
 
 	if logger == nil {
 		return

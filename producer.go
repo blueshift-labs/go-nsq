@@ -12,8 +12,6 @@ import (
 type producerConn interface {
 	String() string
 	SetLogger(logger, LogLevel, string)
-	SetLoggerLevel(LogLevel)
-	SetLoggerForLevel(logger, LogLevel, string)
 	Connect() (*IdentifyResponse, error)
 	Close() error
 	WriteCommand(*Command) error
@@ -30,7 +28,7 @@ type Producer struct {
 	conn   producerConn
 	config Config
 
-	logger   []logger
+	logger   logger
 	logLvl   LogLevel
 	logGuard sync.RWMutex
 
@@ -82,19 +80,13 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 		addr:   addr,
 		config: *config,
 
-		logger: make([]logger, int(LogLevelMax+1)),
+		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,
 
 		transactionChan: make(chan *ProducerTransaction),
 		exitChan:        make(chan int),
 		responseChan:    make(chan []byte),
 		errorChan:       make(chan []byte),
-	}
-
-	// Set default logger for all log levels
-	l := log.New(os.Stderr, "", log.Flags())
-	for index, _ := range p.logger {
-		p.logger[index] = l
 	}
 	return p, nil
 }
@@ -127,40 +119,15 @@ func (w *Producer) SetLogger(l logger, lvl LogLevel) {
 	w.logGuard.Lock()
 	defer w.logGuard.Unlock()
 
-	for level := range w.logger {
-		w.logger[level] = l
-	}
+	w.logger = l
 	w.logLvl = lvl
 }
 
-// SetLoggerForLevel assigns the same logger for specified `level`.
-func (w *Producer) SetLoggerForLevel(l logger, lvl LogLevel) {
-	w.logGuard.Lock()
-	defer w.logGuard.Unlock()
-
-	w.logger[lvl] = l
-}
-
-// SetLoggerLevel sets the package logging level.
-func (w *Producer) SetLoggerLevel(lvl LogLevel) {
-	w.logGuard.Lock()
-	defer w.logGuard.Unlock()
-
-	w.logLvl = lvl
-}
-
-func (w *Producer) getLogger(lvl LogLevel) (logger, LogLevel) {
+func (w *Producer) getLogger() (logger, LogLevel) {
 	w.logGuard.RLock()
 	defer w.logGuard.RUnlock()
 
-	return w.logger[lvl], w.logLvl
-}
-
-func (w *Producer) getLogLevel() LogLevel {
-	w.logGuard.RLock()
-	defer w.logGuard.RUnlock()
-
-	return w.logLvl
+	return w.logger, w.logLvl
 }
 
 // String returns the address of the Producer
@@ -259,6 +226,26 @@ func (w *Producer) sendCommand(cmd *Command) error {
 	return t.Error
 }
 
+// ScheduledPublish synchronously publishes a message body to the specified topic
+// where the message will queue at the channel level until the time comes, returning
+// an error if publish failed
+func (w *Producer) ScheduledPublish(topic string, schedule time.Time, body []byte) error {
+	return w.sendCommand(ScheduledPublish(topic, schedule, body))
+}
+
+// ScheduledPublishAsync publishes a message body to the specified topic
+// where the message will queue at the channel level until the time comes
+// but does not wait for the response from `nsqd`.
+//
+// When the Producer eventually receives the response from `nsqd`,
+// the supplied `doneChan` (if specified)
+// will receive a `ProducerTransaction` instance with the supplied variadic arguments
+// and the response error if present
+func (w *Producer) ScheduledPublishAsync(topic string, schedule time.Time, body []byte,
+	doneChan chan *ProducerTransaction, args ...interface{}) error {
+	return w.sendCommandAsync(ScheduledPublish(topic, schedule, body), doneChan, args)
+}
+
 func (w *Producer) sendCommandAsync(cmd *Command, doneChan chan *ProducerTransaction,
 	args []interface{}) error {
 	// keep track of how many outstanding producers we're dealing with
@@ -306,12 +293,10 @@ func (w *Producer) connect() error {
 
 	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
+	logger, logLvl := w.getLogger()
+
 	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
-	w.conn.SetLoggerLevel(w.getLogLevel())
-	format := fmt.Sprintf("%3d (%%s)", w.id)
-	for index := range w.logger {
-		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), format)
-	}
+	w.conn.SetLogger(logger, logLvl, fmt.Sprintf("%3d (%%s)", w.id))
 
 	_, err := w.conn.Connect()
 	if err != nil {
@@ -404,7 +389,7 @@ func (w *Producer) transactionCleanup() {
 }
 
 func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl := w.getLogger(lvl)
+	logger, logLvl := w.getLogger()
 
 	if logger == nil {
 		return

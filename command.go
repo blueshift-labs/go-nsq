@@ -140,6 +140,13 @@ func DeferredPublish(topic string, delay time.Duration, body []byte) *Command {
 	return &Command{[]byte("DPUB"), params, body}
 }
 
+// ScheduledPublish creates a new Command to write a message to a given topic
+// where the message will queue at the channel level until the time comes
+func ScheduledPublish(topic string, schedule time.Time, body []byte) *Command {
+	var params = [][]byte{[]byte(topic), []byte(strconv.FormatInt(schedule.UnixNano()/int64(time.Second), 10))}
+	return &Command{[]byte("SPUB"), params, body}
+}
+
 // MultiPublish creates a new Command to write more than one message to a given topic
 // (useful for high-throughput situations to avoid roundtrips and saturate the pipe)
 func MultiPublish(topic string, bodies [][]byte) (*Command, error) {
